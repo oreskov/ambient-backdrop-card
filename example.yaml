@@ -1,0 +1,210 @@
+# Examples for Ambient Backdrop
+# Add the card to a dashboard (Edit dashboard -> Add card -> Manual),
+# or use the visual editor and search for "Ambient Backdrop".
+# The card is invisible outside edit mode.
+#
+# Replace weather.YOUR_WEATHER_ENTITY with a weather entity from your own setup.
+# File paths such as /local/backgrounds/... point to /config/www/backgrounds/ on your
+# Home Assistant. They are only examples.
+
+# ---------------------------------------------------------------
+# 1) Minimal: particles, weather and day/night automatically
+# ---------------------------------------------------------------
+type: custom:ambient-backdrop-card
+style: particles
+weather_entity: weather.YOUR_WEATHER_ENTITY
+
+---
+# ---------------------------------------------------------------
+# 2) Aurora with rain/snow/fog on top, a little slower
+# ---------------------------------------------------------------
+type: custom:ambient-backdrop-card
+style: aurora
+weather_entity: weather.YOUR_WEATHER_ENTITY
+speed: 0.8
+aurora_bands: 5
+aurora_height: 1.2
+aurora_intensity: 1
+
+---
+# ---------------------------------------------------------------
+# 3) Starfield with manual colors and no shooting stars
+# ---------------------------------------------------------------
+type: custom:ambient-backdrop-card
+style: starfield
+color_mode: manual
+color_primary: [120, 170, 255]
+color_secondary: [200, 120, 255]
+starfield_shooting: false
+weather_overlay: false
+
+---
+# ---------------------------------------------------------------
+# 4) Light version for old tablets: gradient, low FPS cap, fewer effects
+# ---------------------------------------------------------------
+type: custom:ambient-backdrop-card
+style: gradient
+weather_entity: weather.YOUR_WEATHER_ENTITY
+max_fps: 24
+density: 0.6
+interaction: false
+fog: false
+stars: false
+
+---
+# ---------------------------------------------------------------
+# 5) Test the weather effects without waiting for the weather
+#    (set weather_override back to auto afterwards)
+# ---------------------------------------------------------------
+type: custom:ambient-backdrop-card
+style: bokeh
+weather_override: rain      # clear | partly | cloudy | rain | pour | storm | snow | fog
+
+---
+# ---------------------------------------------------------------
+# 6) The theme's own background with particles on top
+# ---------------------------------------------------------------
+type: custom:ambient-backdrop-card
+style: particles
+background_source: theme
+background_dim: 0.2
+
+---
+# ---------------------------------------------------------------
+# 7) Your own image (/config/www/backgrounds/my-image.jpg), dimmed and slightly blurred
+# ---------------------------------------------------------------
+type: custom:ambient-backdrop-card
+style: bokeh
+weather_entity: weather.YOUR_WEATHER_ENTITY
+background_source: image
+background_image: /local/backgrounds/my-image.jpg
+background_dim: 0.35
+background_blur: 4
+
+---
+# ---------------------------------------------------------------
+# 8) Video in a loop (mp4) with aurora and weather on top
+# ---------------------------------------------------------------
+type: custom:ambient-backdrop-card
+style: aurora
+weather_entity: weather.YOUR_WEATHER_ENTITY
+background_source: video
+background_video: /local/backgrounds/loop.mp4
+background_video_speed: 0.75
+background_dim: 0.3
+color_mode: manual
+color_primary: [120, 200, 255]
+color_secondary: [160, 120, 255]
+
+---
+# ---------------------------------------------------------------
+# 9) Video only: no animation and no weather effects
+# ---------------------------------------------------------------
+type: custom:ambient-backdrop-card
+animation_enabled: false
+weather_overlay: false
+background_source: video
+background_video: /local/backgrounds/loop.mp4
+background_dim: 0.2
+
+---
+# ---------------------------------------------------------------
+# 10) Matrix with runes, following the weather colors
+# ---------------------------------------------------------------
+type: custom:ambient-backdrop-card
+style: matrix
+matrix_charset: runes
+matrix_color: palette
+matrix_depth: true
+weather_entity: weather.YOUR_WEATHER_ENTITY
+
+---
+# ---------------------------------------------------------------
+# 11) Classic Matrix (mirrored katakana, green)
+# ---------------------------------------------------------------
+type: custom:ambient-backdrop-card
+style: matrix
+matrix_charset: katakana
+matrix_mirror: true
+matrix_color: green
+matrix_size: 20
+
+---
+# ---------------------------------------------------------------
+# 12) Matrix with your own characters (e.g. a name) and rainbow colors
+# ---------------------------------------------------------------
+type: custom:ambient-backdrop-card
+style: matrix
+matrix_charset: custom
+matrix_custom: HOME
+matrix_color: rainbow
+
+---
+# ---------------------------------------------------------------
+# 13) Rain on window (looks great together with a weather entity, so rain falls on top)
+# ---------------------------------------------------------------
+type: custom:ambient-backdrop-card
+style: rainwindow
+weather_entity: weather.YOUR_WEATHER_ENTITY
+rainwindow_trails: true
+rainwindow_lights: true
+
+---
+# ---------------------------------------------------------------
+# 14) The other styles
+#     Change 'style' to one of: curtains, waves, hex, lava, dust, bokeh, gradient
+# ---------------------------------------------------------------
+type: custom:ambient-backdrop-card
+style: fireflies
+fireflies_color: warm
+fireflies_blink: 0.8
+
+---
+# ---------------------------------------------------------------
+# 15) Network with cyber colors and diagonal lines
+# ---------------------------------------------------------------
+type: custom:ambient-backdrop-card
+style: network
+network_color: cyber
+network_shape: diagonal
+network_rate: 0.6
+
+---
+# ---------------------------------------------------------------
+# 16) Flow: glowing trails, colored by direction
+# ---------------------------------------------------------------
+type: custom:ambient-backdrop-card
+style: flow
+flow_trail: 50
+flow_scale: 1.3
+flow_color_dir: true
+weather_entity: weather.YOUR_WEATHER_ENTITY
+
+---
+# ---------------------------------------------------------------
+# 17) Retro grid, Miami colors, city skyline and a sunset sky
+# ---------------------------------------------------------------
+type: custom:ambient-backdrop-card
+style: retro
+retro_color: miami
+retro_skyline: city
+retro_sky: true
+
+---
+# ---------------------------------------------------------------
+# 18) Retro sea with mountains (the colors follow the weather)
+# ---------------------------------------------------------------
+type: custom:ambient-backdrop-card
+style: retro
+retro_sea: true
+retro_skyline: mountains
+weather_entity: weather.YOUR_WEATHER_ENTITY
+
+---
+# ---------------------------------------------------------------
+# 19) Dust in light beams with more wind
+# ---------------------------------------------------------------
+type: custom:ambient-backdrop-card
+style: dust
+dust_wind: 1.6
+weather_entity: weather.YOUR_WEATHER_ENTITY
