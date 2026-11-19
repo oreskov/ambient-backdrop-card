@@ -1,15 +1,17 @@
 /*!
- * Ambient Backdrop Card til Home Assistant  (v1.2.0)
+ * Ambient Backdrop Card til Home Assistant  (v1.3.0)
  * https://github.com/oreskov/ambient-backdrop-card  -  MIT-licens
  *
  * Et kort, der lægger en animeret canvas-baggrund bag hele dashboardet.
- * Uden for redigering er kortet usynligt.
+ * Uden for redigering er kortet usynligt. Med display_mode: card vises det i stedet som et almindeligt
+ * kort (med valgfri kant, skygge, hjørner, gennemsigtig baggrund og andre kort oven på animationen).
  * - 16 stilarter (i editorens rækkefølge): partikler, netværk, strømning, matrix, retro-gitter,
  *   hexagon-net, aurora, nordlys-gardiner, stjernehimmel, ildfluer, støv i lys, bokeh,
  *   lavalampe, gradient, bølger og regnvindue.
  * - Farver og vejr-overlay følger en weather.*-entitet og sun.sun (dag/nat).
  * - Valgfri baggrund bag animationen: tema, billede eller mp4-video i loop.
- * - Visuel editor på dansk og engelsk (efter HA's sprog).
+ * - Visuel editor med sektioner, hjælpetekster og panelet "Ændret fra standard", på dansk og engelsk
+ *   (efter HA's sprog).
  *
  * Filen er opdelt i sektioner:
  *   1. Hjælpefunktioner
@@ -25,7 +27,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.2.0';
+  const VERSION = '1.3.0';
 
   /* ======================================================================
    * 1. HJÆLPEFUNKTIONER
@@ -251,6 +253,18 @@
   const DEFAULTS = {
     // Generelt
     style: 'particles', // particles | network | flow | matrix | retro | hex | aurora | curtains | starfield | fireflies | dust | bokeh | lava | gradient | waves | rainwindow
+    display_mode: 'background', // background = bag hele dashboardet (kortet er skjult) | card = vises som et almindeligt kort
+    card_height: 200, // mindste højde i px, når display_mode = card
+    card_border: 'theme', // theme | none | custom (kun når display_mode = card)
+    card_border_width: 1, // px, når card_border = custom
+    card_border_color: [255, 255, 255], // når card_border = custom
+    card_shadow: 'theme', // theme | none | custom
+    card_shadow_strength: 1, // når card_shadow = custom
+    card_radius: 'theme', // theme | square | custom
+    card_radius_px: 12, // når card_radius = custom
+    card_transparent: false, // gør kortets baggrund gennemsigtig (kun når display_mode = card)
+    cards: [], // kort der vises oven på animationen (kun når display_mode = card)
+    card_bg_opacity: 0.5, // baggrundens styrke, når card_transparent er til (1 = ikke gennemsigtig)
     animation_enabled: true, // slå fra for kun at vise baggrund/video (og evt. vejr-overlay)
     weather_entity: '',
     sun_entity: 'sun.sun',
@@ -839,9 +853,12 @@
       ctx.clearRect(0, 0, w, h);
 
       if (cfg.fill_background && cfg.background_source === 'none') {
+        // Visningskort med gennemsigtig baggrund: farven tegnes med den valgte styrke
+        const ba = cfg.display_mode === 'card' && cfg.card_transparent ? Number(cfg.card_bg_opacity) : 1;
+        const bgA = Number.isFinite(ba) ? clamp(ba, 0, 1) : 0.5;
         const g = ctx.createLinearGradient(0, 0, 0, h);
-        g.addColorStop(0, rgba(pal.bg0, 1));
-        g.addColorStop(1, rgba(pal.bg1, 1));
+        g.addColorStop(0, rgba(pal.bg0, bgA));
+        g.addColorStop(1, rgba(pal.bg1, bgA));
         ctx.fillStyle = g;
         ctx.fillRect(0, 0, w, h);
       }
@@ -3227,6 +3244,66 @@
    *    Samtidig gøres dashboardets egen baggrund gennemsigtig.
    *    Der findes kun ét baggrunds-canvas ad gangen.
    * ==================================================================== */
+
+  // Baggrundslag (tema/billede/video + mørklægning/sløring) på et objekt med layer, media, dim, video og _bgKey.
+  // Bruges både af baggrunden bag dashboardet (Bg) og af kortet, når det vises som almindeligt kort.
+  function applyBgLayer(o, cfg) {
+    if (!o.layer) return;
+    const src = cfg.background_source;
+    const themeVal = src === 'theme' ? Bg._themeBg() : '';
+    const dimV = clamp(Number(cfg.background_dim) || 0, 0, 0.95);
+    const blur = clamp(Number(cfg.background_blur) || 0, 0, 40);
+    const speed = clamp(Number(cfg.background_video_speed) || 1, 0.1, 4);
+    const key = [src, cfg.background_image, cfg.background_video, dimV, blur, speed, themeVal].join('|');
+    if (key === o._bgKey) return;
+    o._bgKey = key;
+
+    const M = o.media;
+    // Ryd det gamle
+    if (o.video) {
+      o.video.pause();
+      o.video.removeAttribute('src');
+      o.video.load();
+      o.video = null;
+    }
+    M.replaceChildren();
+    M.style.background = '';
+
+    o.layer.style.display = src === 'none' ? 'none' : 'block';
+    o.dim.style.background = `rgba(0,0,0,${dimV})`;
+    // Sløring: laget forstørres lidt, så de udtværede kanter ligger uden for skærmen
+    M.style.filter = blur > 0 ? `blur(${blur}px)` : '';
+    M.style.transform = blur > 0 ? 'scale(1.1)' : '';
+
+    if (src === 'theme') {
+      M.style.background = themeVal;
+    } else if (src === 'image' && cfg.background_image) {
+      M.style.background = `center / cover no-repeat url("${cssUrl(cfg.background_image)}")`;
+    } else if (src === 'video' && cfg.background_video) {
+      const v = document.createElement('video');
+      v.muted = true; // lydløs, ellers blokerer browseren autoplay
+      v.defaultMuted = true;
+      v.loop = true; // loop
+      v.autoplay = true;
+      v.playsInline = true; // nødvendigt på iOS/mobil
+      v.preload = 'auto';
+      v.setAttribute('muted', '');
+      v.setAttribute('playsinline', '');
+      v.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;';
+      v.src = cfg.background_video;
+      v.addEventListener('loadedmetadata', () => (v.playbackRate = speed));
+      // Sikkerhedsnet: nogle enheder stopper ved enden trods loop
+      v.addEventListener('ended', () => {
+        v.currentTime = 0;
+        v.play().catch(() => {});
+      });
+      M.appendChild(v);
+      o.video = v;
+      v.playbackRate = speed;
+      v.play().catch(() => {});
+    }
+  }
+
   const Bg = {
     engine: null,
     canvas: null,
@@ -3242,10 +3319,16 @@
     timer: null,
     _m: '',
 
+    // Tilmelder et baggrundskort. Det første kort bliver ejer; senere kort venter (inaktive).
+    register(card) {
+      this.owners.add(card);
+      if (!this.owner || !this.owners.has(this.owner)) this.owner = card;
+    },
+
     claim(card, root) {
       clearTimeout(this.timer);
-      this.owners.add(card);
-      this.owner = card;
+      this.register(card);
+      if (this.owner !== card) return false;
       if (!this._mount(root)) return false;
       this.engine.setConfig(card._config);
       this.engine.env = card._env;
@@ -3255,7 +3338,12 @@
 
     release(card) {
       this.owners.delete(card);
-      if (this.owner === card) this.owner = [...this.owners].pop() || null;
+      if (this.owner === card) {
+        this.owner = [...this.owners][0] || null;
+        // Næste kort overtager med det samme (uden at vente på næste tjek)
+        const n = this.owner;
+        if (n && n._connected && n._sync) n._sync();
+      }
       if (this.owners.size === 0) {
         clearTimeout(this.timer);
         // Lille forsinkelse, så skift mellem views ikke får baggrunden til at blinke
@@ -3365,60 +3453,7 @@
 
     // Opdaterer baggrundslaget. Gør kun noget, når indstillingerne (eller temaet) er ændret.
     applyBackground(cfg) {
-      if (!this.layer) return;
-      const src = cfg.background_source;
-      const themeVal = src === 'theme' ? this._themeBg() : '';
-      const dimV = clamp(Number(cfg.background_dim) || 0, 0, 0.95);
-      const blur = clamp(Number(cfg.background_blur) || 0, 0, 40);
-      const speed = clamp(Number(cfg.background_video_speed) || 1, 0.1, 4);
-      const key = [src, cfg.background_image, cfg.background_video, dimV, blur, speed, themeVal].join('|');
-      if (key === this._bgKey) return;
-      this._bgKey = key;
-
-      const M = this.media;
-      // Ryd det gamle
-      if (this.video) {
-        this.video.pause();
-        this.video.removeAttribute('src');
-        this.video.load();
-        this.video = null;
-      }
-      M.replaceChildren();
-      M.style.background = '';
-
-      this.layer.style.display = src === 'none' ? 'none' : 'block';
-      this.dim.style.background = `rgba(0,0,0,${dimV})`;
-      // Sløring: laget forstørres lidt, så de udtværede kanter ligger uden for skærmen
-      M.style.filter = blur > 0 ? `blur(${blur}px)` : '';
-      M.style.transform = blur > 0 ? 'scale(1.1)' : '';
-
-      if (src === 'theme') {
-        M.style.background = themeVal;
-      } else if (src === 'image' && cfg.background_image) {
-        M.style.background = `center / cover no-repeat url("${cssUrl(cfg.background_image)}")`;
-      } else if (src === 'video' && cfg.background_video) {
-        const v = document.createElement('video');
-        v.muted = true; // lydløs, ellers blokerer browseren autoplay
-        v.defaultMuted = true;
-        v.loop = true; // loop
-        v.autoplay = true;
-        v.playsInline = true; // nødvendigt på iOS/mobil
-        v.preload = 'auto';
-        v.setAttribute('muted', '');
-        v.setAttribute('playsinline', '');
-        v.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;';
-        v.src = cfg.background_video;
-        v.addEventListener('loadedmetadata', () => (v.playbackRate = speed));
-        // Sikkerhedsnet: nogle enheder stopper ved enden trods loop
-        v.addEventListener('ended', () => {
-          v.currentTime = 0;
-          v.play().catch(() => {});
-        });
-        M.appendChild(v);
-        this.video = v;
-        v.playbackRate = speed;
-        v.play().catch(() => {});
-      }
+      applyBgLayer(this, cfg);
     },
 
     _unmount() {
@@ -3477,16 +3512,18 @@
       const st = (hass && hass.states) || {};
       const sig = c ? [st[c.weather_entity], st[c.sun_entity]].map((x) => x && x.state).join('|') : '';
       this._hass = hass;
+      if (this._child) this._child.hass = hass;
       if (sig === this._envSig) return; // hverken vejr eller sol er ændret
       this._envSig = sig;
       this._updateEnv();
     }
 
     getCardSize() {
-      return 1;
+      return this._config && this._config.display_mode === 'card' ? 4 : 1;
     }
 
     getGridOptions() {
+      if (this._config && this._config.display_mode === 'card') return { columns: 12, rows: 4, min_columns: 3, min_rows: 2 };
       return { columns: 'full', rows: 'auto', min_columns: 3 };
     }
 
@@ -3502,6 +3539,7 @@
       this._connected = false;
       clearInterval(this._poll);
       Bg.release(this);
+      this._stopDisplay();
       if (this._preview) {
         this._preview.stop();
         this._preview = null;
@@ -3536,6 +3574,7 @@
       this._env = { cat: mapWeather(ws), night };
       if (Bg.owner === this && Bg.engine) Bg.engine.env = this._env;
       if (this._preview) this._preview.env = this._env;
+      if (this._disp) this._disp.env = this._env;
       this._updateLabel();
     }
 
@@ -3554,13 +3593,33 @@
           .info b{display:block}
           .sub{font-size:12px;color:var(--secondary-text-color)}
           .over{position:absolute;left:0;right:0;bottom:0;background:linear-gradient(transparent,rgba(0,0,0,.55));color:#fff;padding:18px 14px 8px;font-size:12px}
+          .stage{position:absolute;inset:0;overflow:hidden}
+          .stage[hidden]{display:none}
+          .layer{position:absolute;inset:0;overflow:hidden;display:none}
+          .media,.dim{position:absolute;inset:0}
+          .cv{position:absolute;inset:0;width:100%;height:100%;display:block}
+          .info[hidden]{display:none}
+          .content{position:relative;z-index:1;box-sizing:border-box;width:100%;padding:8px}
+          .content[hidden]{display:none}
         </style>
         <ha-card>
+          <div class="stage" hidden>
+            <div class="layer"><div class="media"></div><div class="dim"></div></div>
+            <canvas class="cv"></canvas>
+          </div>
+          <div class="content" hidden></div>
           <canvas class="pv" hidden></canvas>
           <div class="info"><ha-icon icon="mdi:weather-partly-snowy-rainy"></ha-icon>
             <div><b>Ambient Backdrop</b><span class="sub"></span></div></div>
         </ha-card>`;
-      this._canvas = sr.querySelector('canvas');
+      this._card = sr.querySelector('ha-card');
+      this._stage = sr.querySelector('.stage');
+      this._dlayer = sr.querySelector('.layer');
+      this._dmedia = sr.querySelector('.media');
+      this._ddim = sr.querySelector('.dim');
+      this._dcv = sr.querySelector('.cv');
+      this._content = sr.querySelector('.content');
+      this._canvas = sr.querySelector('canvas.pv');
       this._info = sr.querySelector('.info');
       this._sub = sr.querySelector('.sub');
     }
@@ -3582,35 +3641,210 @@
       if (!this._sub) return;
       const c = this._config;
       const hass = this._hass;
+      if (this._inactive) {
+        this._sub.textContent = t(hass, 'card_bg_taken');
+        return;
+      }
       const style = t(hass, `style_${c.style}`).split(' (')[0]; // kort navn uden forklaring i parentes
       const cat = t(hass, `cat_${this._env.cat}`);
       const when = t(hass, this._env.night ? 'card_night' : 'card_day');
       this._sub.textContent = `${style} · ${cat} · ${when}`;
     }
 
+    // Almindeligt kort: kortet har sin egen animation (og baggrund) inde i sig selv
+    _showDisplay(c) {
+      if (!this._disp) {
+        this._disp = new Engine(this._dcv, () => ({ w: this._dcv.clientWidth || 300, h: this._dcv.clientHeight || 170 }));
+        this._dbg = { layer: this._dlayer, media: this._dmedia, dim: this._ddim, video: null, _bgKey: '' };
+        this._observeDisplay();
+      }
+      this._card.style.minHeight = `${clamp(Number(c.card_height) || 200, 10, 1200)}px`;
+      this._applyFrame(c);
+      this._syncChildren(c);
+      this._disp.setConfig(c);
+      this._disp.env = this._env;
+      applyBgLayer(this._dbg, c);
+      if (this._visible !== false) this._disp.start();
+    }
+
+    // Kortene på animationen: oprettes som et vertical-stack med HA's egen kort-hjælper
+    _syncChildren(c) {
+      const list = Array.isArray(c.cards) ? c.cards : [];
+      const sig = JSON.stringify(list);
+      if (sig === this._childSig) return;
+      this._childSig = sig;
+      this._clearChildren();
+      if (!list.length) return;
+      const token = (this._childTok = (this._childTok || 0) + 1);
+      const fail = (e) => {
+        if (token !== this._childTok) return;
+        this._content.hidden = false;
+        this._content.textContent = `Ambient Backdrop: ${(e && e.message) || e}`;
+      };
+      try {
+        Promise.resolve(window.loadCardHelpers ? window.loadCardHelpers() : null)
+          .then((h) => {
+            if (token !== this._childTok || !this._connected) return;
+            if (!h || !h.createCardElement) throw new Error('card helpers missing');
+            const el = h.createCardElement({ type: 'vertical-stack', cards: list });
+            if (this._hass) el.hass = this._hass;
+            this._child = el;
+            this._content.textContent = '';
+            this._content.appendChild(el);
+            this._content.hidden = false;
+          })
+          .catch(fail);
+      } catch (e) {
+        fail(e);
+      }
+    }
+
+    _clearChildren() {
+      this._childTok = (this._childTok || 0) + 1;
+      this._child = null;
+      if (this._content) {
+        this._content.textContent = '';
+        this._content.hidden = true;
+      }
+    }
+
+    // Kant, skygge, hjørner og gennemsigtig flade på visningskortet. "Som tema" lader temaet bestemme.
+    _applyFrame(c) {
+      const st = this._card.style;
+      if (c.card_border === 'none') st.border = 'none';
+      else if (c.card_border === 'custom') {
+        st.border = `${clamp(Number(c.card_border_width) || 1, 0, 12)}px solid ${rgba(parseColor(c.card_border_color, [255, 255, 255]), 1)}`;
+      } else st.border = '';
+
+      if (c.card_shadow === 'none') st.boxShadow = 'none';
+      else if (c.card_shadow === 'custom') {
+        const k = clamp(Number(c.card_shadow_strength) || 1, 0.1, 5);
+        st.boxShadow = `0 ${(4 * k).toFixed(1)}px ${(16 * k).toFixed(1)}px rgba(0,0,0,${clamp(0.25 * k, 0, 0.7).toFixed(2)})`;
+      } else st.boxShadow = '';
+
+      if (c.card_radius === 'square') st.borderRadius = '0';
+      else if (c.card_radius === 'custom') st.borderRadius = `${clamp(Number(c.card_radius_px), 0, 80) || 0}px`;
+      else st.borderRadius = '';
+
+      st.background = c.card_transparent ? 'transparent' : '';
+      // Tema/billede/video-baggrunden følger samme gennemsigtighed
+      const ba = Number(c.card_bg_opacity);
+      this._dlayer.style.opacity = c.card_transparent ? String(Number.isFinite(ba) ? clamp(ba, 0, 1) : 0.5) : '';
+    }
+
+    // Animation og video pauser, når kortet ikke er synligt (uden for skærmen eller skjult fane)
+    _observeDisplay() {
+      this._visible = true;
+      const setVideo = (play) => {
+        const v = this._dbg && this._dbg.video;
+        if (!v) return;
+        if (play && !document.hidden) v.play().catch(() => {});
+        else v.pause();
+      };
+      this._dvis = () => setVideo(this._visible !== false);
+      this._dptr = () => {
+        const v = this._dbg && this._dbg.video;
+        if (v && v.paused && !document.hidden && this._visible !== false) v.play().catch(() => {});
+      };
+      document.addEventListener('visibilitychange', this._dvis);
+      window.addEventListener('pointerdown', this._dptr, { passive: true });
+      if (typeof IntersectionObserver === 'function') {
+        this._io = new IntersectionObserver((entries) => {
+          this._visible = entries[entries.length - 1].isIntersecting;
+          if (!this._disp) return;
+          if (this._visible) this._disp.start();
+          else this._disp.stop();
+          setVideo(this._visible);
+        });
+        this._io.observe(this);
+      }
+    }
+
+    _stopDisplay() {
+      if (this._io) {
+        this._io.disconnect();
+        this._io = null;
+      }
+      if (this._dvis) document.removeEventListener('visibilitychange', this._dvis);
+      if (this._dptr) window.removeEventListener('pointerdown', this._dptr);
+      this._dvis = this._dptr = null;
+      this._childSig = null;
+      this._clearChildren();
+      if (this._disp) {
+        this._disp.stop();
+        this._disp = null;
+      }
+      if (this._dbg) {
+        const v = this._dbg.video;
+        if (v) {
+          v.pause();
+          v.removeAttribute('src');
+          v.load();
+        }
+        this._dmedia.replaceChildren();
+        this._dlayer.style.display = 'none';
+        this._dlayer.style.opacity = '';
+        this._dbg = null;
+      }
+      this._visible = undefined;
+      if (this._card) {
+        const st = this._card.style;
+        st.minHeight = st.border = st.boxShadow = st.borderRadius = st.background = '';
+      }
+    }
+
     _sync(fromPoll) {
       if (!this._connected || !this._built) return;
       const root = this._findRoot();
       const c = this._config;
+      const cardMode = c.display_mode === 'card';
+      this._stage.hidden = !cardMode;
+      this._info.hidden = cardMode;
 
-      if (root) {
-        // Rigtigt dashboard: baggrunden kører bag kortene
-        const edit = !!(root.lovelace && root.lovelace.editMode);
-        const show = edit || c.always_show_preview;
-        this.style.display = show ? '' : 'none';
+      if (cardMode) {
+        // Vises som almindeligt kort: rører ikke baggrunden bag dashboardet
+        if (Bg.owners.has(this)) Bg.release(this);
+        this._inactive = false;
+        this.style.display = '';
         this._canvas.hidden = true;
         if (this._preview) {
           this._preview.stop();
           this._preview = null;
         }
-        if (!fromPoll || Bg.owner !== this) Bg.claim(this, root);
-        else if (Bg.engine) {
+        this._showDisplay(c);
+        this._updateLabel();
+        return;
+      }
+      this._stopDisplay();
+
+      if (root) {
+        // Rigtigt dashboard: baggrunden kører bag kortene
+        const edit = !!(root.lovelace && root.lovelace.editMode);
+        this._canvas.hidden = true;
+        if (this._preview) {
+          this._preview.stop();
+          this._preview = null;
+        }
+        Bg.register(this);
+        if (Bg.owner !== this) {
+          // Et andet kort er allerede baggrund på denne visning: dette er inaktivt
+          this._inactive = true;
+          this.style.display = edit ? '' : 'none';
+          this._updateLabel();
+          return;
+        }
+        this._inactive = false;
+        const show = edit || c.always_show_preview;
+        this.style.display = show ? '' : 'none';
+        if (!fromPoll || !Bg.engine) Bg.claim(this, root);
+        else {
           Bg.engine.setConfig(c);
           Bg.engine.env = this._env;
           Bg.applyBackground(c); // fanger også, at temaet skifter
         }
       } else {
         // Editorens forhåndsvisning: lille mini-canvas i selve kortet
+        this._inactive = false;
         this.style.display = '';
         this._canvas.hidden = false;
         if (!this._preview) {
@@ -3668,6 +3902,54 @@
       sec_colors: 'Colors',
       sec_weather: 'Weather overlay',
       sec_adv: 'Advanced',
+      display_mode: 'Display',
+      help_display_mode: 'Background: the animation runs behind the whole dashboard and the card is hidden (default). Regular card: the animation is shown inside the card itself, like any other card. Only one card per view can be the background.',
+      opt_display_mode_background: 'Background behind the dashboard',
+      opt_display_mode_card: 'Regular card',
+      card_height: 'Card height (px)',
+      help_card_height: 'Minimum height of the card when Display is Regular card. In the sections view the card also follows its size in the grid (default: 200).',
+      card_bg_taken: 'Another Ambient Backdrop card is already the background on this view. Only one card can be.',
+      card_border: 'Border on the card',
+      help_card_border: 'As theme uses the border of your theme. None removes the border. Custom lets you choose width and color (default: As theme).',
+      opt_card_border_theme: 'As theme',
+      opt_card_border_none: 'No border',
+      opt_card_border_custom: 'Custom border',
+      card_border_width: 'Border width (px)',
+      help_card_border_width: 'How thick the border is (default: 1).',
+      card_border_color: 'Border color',
+      help_card_border_color: 'The color of the border (default: white).',
+      card_shadow: 'Shadow under the card',
+      help_card_shadow: 'As theme uses the shadow of your theme. None removes it. Custom lets you choose the strength (default: As theme).',
+      opt_card_shadow_theme: 'As theme',
+      opt_card_shadow_none: 'No shadow',
+      opt_card_shadow_custom: 'Custom shadow',
+      card_shadow_strength: 'Shadow strength',
+      help_card_shadow_strength: 'How strong and soft the shadow is. 1 is a normal shadow (default: 1).',
+      card_radius: 'Corners',
+      help_card_radius: 'As theme uses the rounded corners of your theme. Square gives sharp corners. Custom lets you choose the radius (default: As theme).',
+      opt_card_radius_theme: 'As theme',
+      opt_card_radius_square: 'Square',
+      opt_card_radius_custom: 'Custom radius',
+      card_radius_px: 'Corner radius (px)',
+      help_card_radius_px: 'How rounded the corners are (default: 12).',
+      cards: 'Cards on the animation',
+      help_cards: 'Cards shown on top of the animation, for example buttons. Add, edit and reorder them here like in a stack card. Only used with "Regular card" (default: none).',
+      cards_unit: 'cards',
+      cards_fallback: 'Card picker not available. Edit the cards as YAML:',
+      card_transparent: 'Transparent background',
+      help_card_transparent: 'Makes the background behind the animation see-through, so the dashboard shows through. Choose how much below. The animation itself is set with "Opacity of the animation" (default: off).',
+      card_bg_opacity: 'Background opacity',
+      help_card_bg_opacity: 'How much of the background is visible. 1 is not see-through, lower values let the dashboard shine through. Applies to the colored background or the theme/image/video, not the animation itself (default: 0.5).',
+      sec_general: 'General',
+      sec_changed: 'Changed from default',
+      changed_none: 'Everything is at its default.',
+      changed_reset: 'Reset this setting',
+      changed_reset_all: 'Reset all',
+      changed_confirm: 'Are you sure?',
+      changed_yes: 'Yes',
+      changed_no: 'No',
+      val_on: 'On',
+      val_off: 'Off',
 
       // Valgmuligheder
       opt_fireflies_color_warm: 'Yellow-green (classic)',
@@ -3850,6 +4132,89 @@
       help_weather_override: 'Use it to test rain, snow etc. without waiting for the weather. Set it back to Automatic afterwards.',
       help_density: 'Mobile and slow devices automatically get fewer.',
       help_always_show_preview: 'Otherwise the card is invisible when you are not editing.',
+      help_style: 'Choose which animation runs behind the dashboard. Each style has its own settings in the section below. Default: Particles with lines.',
+      help_weather_entity: 'Pick your weather entity so colors and weather effects follow the weather. Without it the card behaves as if the weather is clear (default: none).',
+      help_opacity: 'How strong the animation is. 1 is full strength, lower values make it more subtle (default: 0.85).',
+      help_speed: 'How fast the animation moves. 1 is normal speed (default: 1).',
+      help_interaction: 'Lets the animation react when you move the mouse or touch the screen. Turn off for a calmer background (default: on).',
+      help_color_mode: 'Auto changes colors with the weather and day/night. Manual uses the two colors below (default: auto).',
+      help_color_primary: 'The main color of the animation when color mode is manual (default: blue).',
+      help_color_secondary: 'A second color that is blended with the primary one when color mode is manual (default: purple).',
+      help_background_video_speed: 'Playback speed of the background video. 1 is normal, lower is slow motion (default: 1).',
+      help_weather_overlay: 'The main switch for rain, snow, fog and stars. When off, all of them are hidden regardless of the switches below (default: on).',
+      help_rain: 'Shows rain in rainy, pouring and stormy weather (default: on).',
+      help_snow: 'Shows snowflakes in snowy weather (default: on).',
+      help_fog: 'Shows fog in foggy weather (default: on).',
+      help_stars: 'Shows stars at night when the weather is clear or partly cloudy (default: on).',
+      help_max_fps: 'Upper limit for frames per second. Lower saves battery and is easier on weak devices (default: 40).',
+      help_fill_background: 'Draws a dark, colored background behind the animation. Only used when Background type is None (default: on).',
+      help_dither: 'Adds almost invisible noise so color gradients show no banding, especially on large screens. Costs a little performance (default: on).',
+      help_sun_entity: 'Used to decide whether it is day or night. Without it the card guesses from the clock (default: sun.sun).',
+      help_respect_reduced_motion: 'If your device is set to reduce motion, the animation slows down and weather effects are turned off (default: on).',
+      help_particles_line_distance: 'How close two particles must be to get a line between them, in pixels. Larger gives more lines and costs more (default: 140).',
+      help_particles_line_opacity: 'How visible the lines between particles are. 1 is full strength (default: 0.35).',
+      help_particles_size: 'The size of the particles (default: 1).',
+      help_network_size: 'The size of the nodes in the network (default: 1).',
+      help_network_speed: 'How fast the signals travel along the lines (default: 0.5).',
+      help_network_glow: 'Gives nodes and signals a soft glow. Costs a little performance (default: on).',
+      help_network_shape: 'How the lines between nodes run. Mixed picks a random shape per line (default: Angled).',
+      help_network_scan: 'Shows rings that now and then spread out like a scan (default: on).',
+      help_network_color: 'Color set for lines, nodes and signals. "Follow the palette" uses the weather and color settings (default: Terminal green).',
+      help_flow_trail: 'How long the trails are, counted in points. Longer trails are smoother but cost more (default: 40).',
+      help_flow_speed: 'How fast the trails move (default: 1).',
+      help_flow_width: 'How thick the trails are (default: 1).',
+      help_flow_glow: 'Gives the front of each trail a glowing halo. Costs a little performance (default: on).',
+      help_flow_color_dir: 'Colors the trails by the direction they move in (default: on).',
+      help_matrix_size: 'The size of the characters in pixels. Larger characters give fewer columns (default: 18).',
+      help_matrix_trail: 'How long the tail behind each head is (default: 1.2).',
+      help_matrix_color: 'Classic green, weather/color palette or rainbow (default: Classic green).',
+      help_matrix_head: 'Makes the front character of each column glow (default: on).',
+      help_matrix_glow_style: '"The character itself glows" looks great but is heavier. "Round soft spot" is lighter and easier on weak devices (default: Round soft spot).',
+      help_matrix_glow: 'The strength of the glow. 0 is no glow, 1 strong, 2 very strong. Around 1 suits "The character itself glows" best (default: 0.2).',
+      help_matrix_variation: 'How much speed, tail length and strength vary between columns. 0 is all alike, 1.5 is very different (default: 1).',
+      help_matrix_mutate: 'How often the characters in a column change. 0 is never (default: 1).',
+      help_retro_speed: 'How fast the grid comes towards you. 0 stops the movement (default: 1).',
+      help_retro_horizon: 'How high the horizon sits, as a share of the card height (default: 0.55).',
+      help_retro_lines: 'How many lines the grid has (default: 14).',
+      help_retro_skyline: 'What stands on the horizon: mountains, skyline or nothing. Skyline is heavier than mountains (default: Mountains).',
+      help_retro_sea: 'Shows a sea instead of the grid (default: off).',
+      help_retro_glow: 'The strength of the neon glow. 0 is no glow (default: 1).',
+      help_hex_size: 'The size of each hexagon in pixels. Smaller gives more cells and costs more (default: 44).',
+      help_hex_grid: 'Shows the net of edge lines itself (default: on).',
+      help_hex_fill: 'Fills the cells that light up (default: on).',
+      help_hex_waves: 'Lets waves of light run across the net (default: on).',
+      help_hex_ripples: 'Shows ripples that spread across the net (default: on).',
+      help_aurora_bands: 'How many aurora bands are shown (default: 4).',
+      help_aurora_height: 'How high the bands reach (default: 1).',
+      help_aurora_intensity: 'How brightly the aurora shines (default: 1).',
+      help_curtains_layers: 'How many light curtains sit behind each other (default: 3).',
+      help_curtains_height: 'How high the curtains reach (default: 1).',
+      help_curtains_rays: 'How many vertical rays each curtain is made of. More gives more detail but costs more (default: 24).',
+      help_starfield_size: 'The size of the stars (default: 1).',
+      help_starfield_twinkle: 'Lets the stars twinkle (default: on).',
+      help_starfield_parallax: 'Gives depth, so near stars move differently from distant ones (default: on).',
+      help_starfield_shooting: 'Now and then shows a shooting star (default: on).',
+      help_fireflies_size: 'The size of the fireflies (default: 1).',
+      help_fireflies_glow: 'The strength of the glow around each firefly (default: 1).',
+      help_fireflies_color: 'Yellow-green (classic), amber or follow the palette (default: Yellow-green).',
+      help_dust_beams: 'How many light beams fall down (default: 4).',
+      help_dust_origin: 'Where along the top the light comes from. 0 is far left, 1 is far right (default: 0.15).',
+      help_dust_strength: 'How brightly the light beams shine (default: 1).',
+      help_dust_motes: 'Shows small specks of dust floating in the light (default: on).',
+      help_bokeh_size: 'The size of the light bubbles (default: 1).',
+      help_bokeh_soft: 'How soft the edges of the bubbles are. 0 is sharp, 1 is very soft (default: 0.5).',
+      help_lava_blobs: 'How many blobs float around (default: 6).',
+      help_lava_size: 'The size of the blobs (default: 1).',
+      help_lava_glow: 'Makes the middle of each blob lighter (default: on).',
+      help_gradient_blobs: 'How many color blobs flow into each other (default: 5).',
+      help_gradient_size: 'The size of the color blobs (default: 1).',
+      help_waves_layers: 'How many wave layers sit behind each other. More looks richer but costs more (default: 5).',
+      help_waves_height: 'How tall the waves are (default: 1).',
+      help_waves_glow: 'Shows a glow at the horizon (default: on).',
+      help_waves_foam: 'Draws a light foam edge on the waves (default: on).',
+      help_rainwindow_size: 'The size of the drops on the window (default: 1).',
+      help_rainwindow_trails: 'Lets the drops leave a trail as they run down (default: on).',
+      help_rainwindow_lights: 'Shows blurred lights behind the window (default: on).',
       help_dither_strength: 'Raise it if you still see bands. Lower it if you see grain. 0 = off.',
       help_background_source: 'The theme background uses the image/color your theme sets (lovelace-background).',
       help_background_image: 'E.g. /local/backgrounds/my-image.jpg (the file lives in /config/www/backgrounds/).',
@@ -3903,6 +4268,54 @@
       sec_colors: 'Farver',
       sec_weather: 'Vejr-overlay',
       sec_adv: 'Avanceret',
+      display_mode: 'Visning',
+      help_display_mode: 'Baggrund: animationen kører bag hele dashboardet, og kortet er skjult (standard). Almindeligt kort: animationen vises inde i selve kortet som ethvert andet kort. Kun ét kort pr. visning kan være baggrund.',
+      opt_display_mode_background: 'Baggrund bag dashboardet',
+      opt_display_mode_card: 'Almindeligt kort',
+      card_height: 'Kortets højde (px)',
+      help_card_height: 'Mindste højde på kortet, når Visning er Almindeligt kort. I sektionsvisning følger kortet også sin størrelse i gitteret (standard: 200).',
+      card_bg_taken: 'Et andet Ambient Backdrop-kort er allerede baggrund på denne visning. Der kan kun være ét.',
+      card_border: 'Kant på kortet',
+      help_card_border: 'Som tema bruger dit temas kant. Ingen fjerner kanten. Egen lader dig vælge bredde og farve (standard: Som tema).',
+      opt_card_border_theme: 'Som tema',
+      opt_card_border_none: 'Ingen kant',
+      opt_card_border_custom: 'Egen kant',
+      card_border_width: 'Kantbredde (px)',
+      help_card_border_width: 'Tykkelsen på kanten (standard: 1).',
+      card_border_color: 'Kantfarve',
+      help_card_border_color: 'Farven på kanten (standard: hvid).',
+      card_shadow: 'Skygge under kortet',
+      help_card_shadow: 'Som tema bruger dit temas skygge. Ingen fjerner den. Egen lader dig vælge styrken (standard: Som tema).',
+      opt_card_shadow_theme: 'Som tema',
+      opt_card_shadow_none: 'Ingen skygge',
+      opt_card_shadow_custom: 'Egen skygge',
+      card_shadow_strength: 'Skyggestyrke',
+      help_card_shadow_strength: 'Hvor kraftig og blød skyggen er. 1 er en almindelig skygge (standard: 1).',
+      card_radius: 'Hjørner',
+      help_card_radius: 'Som tema bruger dit temas afrundede hjørner. Kantede giver rette hjørner. Egen lader dig vælge radius (standard: Som tema).',
+      opt_card_radius_theme: 'Som tema',
+      opt_card_radius_square: 'Kantede',
+      opt_card_radius_custom: 'Egen radius',
+      card_radius_px: 'Hjørneradius (px)',
+      help_card_radius_px: 'Hvor afrundede hjørnerne er (standard: 12).',
+      cards: 'Kort på animationen',
+      help_cards: 'Kort der vises oven på animationen, fx knapper. Tilføj, redigér og flyt dem her som i et stack-kort. Bruges kun med "Almindeligt kort" (standard: ingen).',
+      cards_unit: 'kort',
+      cards_fallback: 'Kortvælgeren er ikke tilgængelig. Redigér kortene som YAML:',
+      card_transparent: 'Gennemsigtig baggrund',
+      help_card_transparent: 'Gør baggrunden bag animationen gennemsigtig, så dashboardet skinner igennem. Vælg hvor meget herunder. Selve animationen styres med "Gennemsigtighed på animation" (standard: fra).',
+      card_bg_opacity: 'Baggrundens gennemsigtighed',
+      help_card_bg_opacity: 'Hvor meget af baggrunden der ses. 1 er ikke gennemsigtig, lavere lader dashboardet skinne igennem. Gælder baggrundsfarven eller tema/billede/video, ikke selve animationen (standard: 0,5).',
+      sec_general: 'Generelt',
+      sec_changed: 'Ændret fra standard',
+      changed_none: 'Alt er standard.',
+      changed_reset: 'Nulstil denne indstilling',
+      changed_reset_all: 'Nulstil alle',
+      changed_confirm: 'Er du sikker?',
+      changed_yes: 'Ja',
+      changed_no: 'Nej',
+      val_on: 'Til',
+      val_off: 'Fra',
 
       // Valgmuligheder
       opt_fireflies_color_warm: 'Gulgrøn (klassisk)',
@@ -4085,6 +4498,89 @@
       help_weather_override: 'Bruges til at teste regn, sne osv. uden at vente på vejret. Sæt tilbage til Automatisk bagefter.',
       help_density: 'Mobil og langsomme enheder får automatisk færre.',
       help_always_show_preview: 'Ellers er kortet usynligt, når der ikke redigeres.',
+      help_style: 'Vælg, hvilken animation der kører bag dashboardet. Hver stil har sine egne indstillinger i sektionen under. Standard: Partikler med linjer.',
+      help_weather_entity: 'Vælg din vejr-entitet, så farver og vejr-effekter følger vejret. Uden den kører kortet, som om vejret er klart (standard: ingen).',
+      help_opacity: 'Hvor kraftig animationen er. 1 er fuld styrke, lavere værdier gør den mere diskret (standard: 0,85).',
+      help_speed: 'Hvor hurtigt animationen bevæger sig. 1 er normal fart (standard: 1).',
+      help_interaction: 'Lader animationen reagere, når du bevæger musen eller rører skærmen. Slå fra for en roligere baggrund (standard: til).',
+      help_color_mode: 'Auto skifter farver efter vejr og dag/nat. Manuel bruger de to farver herunder (standard: auto).',
+      help_color_primary: 'Hovedfarven i animationen, når farvetilstand er manuel (standard: blå).',
+      help_color_secondary: 'Anden farve, som blandes med den primære, når farvetilstand er manuel (standard: lilla).',
+      help_background_video_speed: 'Afspilningshastighed for baggrundsvideoen. 1 er normal, lavere er slow motion (standard: 1).',
+      help_weather_overlay: 'Hovedkontakten til regn, sne, tåge og stjerner. Slået fra skjuler den dem alle, uanset kontakterne herunder (standard: til).',
+      help_rain: 'Viser regn ved regnvejr, styrtregn og torden (standard: til).',
+      help_snow: 'Viser snefnug ved snevejr (standard: til).',
+      help_fog: 'Viser tåge ved tåget vejr (standard: til).',
+      help_stars: 'Viser stjerner, når det er nat, og vejret er klart eller let skyet (standard: til).',
+      help_max_fps: 'Øvre grænse for billeder pr. sekund. Lavere sparer batteri og belaster svage enheder mindre (standard: 40).',
+      help_fill_background: 'Tegner en mørk, farvet baggrund bag animationen. Bruges kun, når Baggrundstype er Ingen (standard: til).',
+      help_dither: 'Tilføjer næsten usynlig støj, så der ikke ses striber i farveforløb, især på store skærme. Koster lidt ydelse (standard: til).',
+      help_sun_entity: 'Bruges til at afgøre, om det er dag eller nat. Uden den gætter kortet ud fra klokken (standard: sun.sun).',
+      help_respect_reduced_motion: 'Hvis din enhed er sat til at reducere bevægelse, bliver animationen langsommere, og vejr-effekter slås fra (standard: til).',
+      help_particles_line_distance: 'Hvor tæt to partikler skal være for at få en linje imellem sig, i pixel. Større giver flere linjer og koster mere (standard: 140).',
+      help_particles_line_opacity: 'Hvor tydelige linjerne mellem partiklerne er. 1 er fuld styrke (standard: 0,35).',
+      help_particles_size: 'Størrelsen på partiklerne (standard: 1).',
+      help_network_size: 'Størrelsen på knuderne i netværket (standard: 1).',
+      help_network_speed: 'Hvor hurtigt signalerne bevæger sig langs linjerne (standard: 0,5).',
+      help_network_glow: 'Giver knuder og signaler et blødt skær. Koster lidt ydelse (standard: til).',
+      help_network_shape: 'Hvordan linjerne mellem knuderne forløber. Blandet vælger en tilfældig form pr. linje (standard: Vinklede).',
+      help_network_scan: 'Viser ringe, der af og til breder sig ud som en scanning (standard: til).',
+      help_network_color: 'Farvesæt til linjer, knuder og signaler. "Følg paletten" bruger vejr- og farveindstillingerne (standard: Terminal-grøn).',
+      help_flow_trail: 'Hvor lange sporene er, regnet i punkter. Længere spor er blødere, men koster mere (standard: 40).',
+      help_flow_speed: 'Hvor hurtigt sporene bevæger sig (standard: 1).',
+      help_flow_width: 'Hvor tykke sporene er (standard: 1).',
+      help_flow_glow: 'Giver forenden af hvert spor et lysende skær. Koster lidt ydelse (standard: til).',
+      help_flow_color_dir: 'Farver sporene efter den retning, de bevæger sig i (standard: til).',
+      help_matrix_size: 'Størrelsen på tegnene i pixel. Større tegn giver færre kolonner (standard: 18).',
+      help_matrix_trail: 'Hvor lang halen efter hvert hoved er (standard: 1,2).',
+      help_matrix_color: 'Klassisk grøn, vejr-/farvepalette eller regnbue (standard: Klassisk grøn).',
+      help_matrix_head: 'Får det forreste tegn i hver kolonne til at lyse (standard: til).',
+      help_matrix_glow_style: '"Selve tegnet lyser" er flot, men tungere. "Rund blød plet" er lettere og kan belaste svage enheder mindre (standard: Rund blød plet).',
+      help_matrix_glow: 'Glødens styrke. 0 er ingen glød, 1 kraftig, 2 meget kraftig. Omkring 1 passer bedst til "Selve tegnet lyser" (standard: 0,2).',
+      help_matrix_variation: 'Hvor meget fart, halelængde og styrke varierer mellem kolonnerne. 0 er alle ens, 1,5 er meget forskellige (standard: 1).',
+      help_matrix_mutate: 'Hvor ofte tegnene i en kolonne skifter. 0 er aldrig (standard: 1).',
+      help_retro_speed: 'Hvor hurtigt gitteret kommer imod dig. 0 stopper bevægelsen (standard: 1).',
+      help_retro_horizon: 'Hvor højt horisonten ligger, som andel af kortets højde (standard: 0,55).',
+      help_retro_lines: 'Hvor mange linjer gitteret har (standard: 14).',
+      help_retro_skyline: 'Hvad der står på horisonten: bjerge, skyline eller ingenting. Skyline er tungere end bjerge (standard: Bjerge).',
+      help_retro_sea: 'Viser et hav i stedet for gitteret (standard: fra).',
+      help_retro_glow: 'Styrken af neonskæret. 0 er ingen glød (standard: 1).',
+      help_hex_size: 'Størrelsen på hvert hexagon i pixel. Mindre giver flere felter og koster mere (standard: 44).',
+      help_hex_grid: 'Viser selve nettet af kantlinjer (standard: til).',
+      help_hex_fill: 'Fylder de felter, der lyser op (standard: til).',
+      help_hex_waves: 'Lader bølger af lys løbe hen over nettet (standard: til).',
+      help_hex_ripples: 'Viser krusninger, der breder sig henover nettet (standard: til).',
+      help_aurora_bands: 'Hvor mange nordlysbånd der vises (standard: 4).',
+      help_aurora_height: 'Hvor højt båndene rækker (standard: 1).',
+      help_aurora_intensity: 'Hvor kraftigt nordlyset lyser (standard: 1).',
+      help_curtains_layers: 'Hvor mange lysgardiner der ligger bag hinanden (standard: 3).',
+      help_curtains_height: 'Hvor højt gardinerne rækker (standard: 1).',
+      help_curtains_rays: 'Hvor mange lodrette stråler hvert gardin består af. Flere giver mere detalje, men koster mere (standard: 24).',
+      help_starfield_size: 'Størrelsen på stjernerne (standard: 1).',
+      help_starfield_twinkle: 'Lader stjernerne blinke (standard: til).',
+      help_starfield_parallax: 'Giver dybde, så nære stjerner bevæger sig anderledes end fjerne (standard: til).',
+      help_starfield_shooting: 'Viser nu og da et stjerneskud (standard: til).',
+      help_fireflies_size: 'Størrelsen på ildfluerne (standard: 1).',
+      help_fireflies_glow: 'Styrken af skæret omkring hver ildflue (standard: 1).',
+      help_fireflies_color: 'Gulgrøn (klassisk), rav eller følg paletten (standard: Gulgrøn).',
+      help_dust_beams: 'Hvor mange lysstråler der falder ned (standard: 4).',
+      help_dust_origin: 'Hvor langs toppen lyset kommer fra. 0 er yderst til venstre, 1 yderst til højre (standard: 0,15).',
+      help_dust_strength: 'Hvor kraftigt lysstrålerne lyser (standard: 1).',
+      help_dust_motes: 'Viser små støvkorn, der svæver i lyset (standard: til).',
+      help_bokeh_size: 'Størrelsen på lysboblerne (standard: 1).',
+      help_bokeh_soft: 'Hvor bløde boblernes kanter er. 0 er skarpe, 1 er meget bløde (standard: 0,5).',
+      help_lava_blobs: 'Hvor mange klatter der svæver rundt (standard: 6).',
+      help_lava_size: 'Størrelsen på klatterne (standard: 1).',
+      help_lava_glow: 'Gør midten af hver klat lysere (standard: til).',
+      help_gradient_blobs: 'Hvor mange farveklatter der flyder ind i hinanden (standard: 5).',
+      help_gradient_size: 'Størrelsen på farveklatterne (standard: 1).',
+      help_waves_layers: 'Hvor mange bølgelag der ligger bag hinanden. Flere ser rigere ud, men koster mere (standard: 5).',
+      help_waves_height: 'Hvor høje bølgerne er (standard: 1).',
+      help_waves_glow: 'Viser et lysskær ved horisonten (standard: til).',
+      help_waves_foam: 'Tegner en lys skumkant på bølgerne (standard: til).',
+      help_rainwindow_size: 'Størrelsen på dråberne på ruden (standard: 1).',
+      help_rainwindow_trails: 'Lader dråberne efterlade et spor, når de løber ned (standard: til).',
+      help_rainwindow_lights: 'Viser slørede lys bag ruden (standard: til).',
       help_dither_strength: 'Hæv den, hvis der stadig ses bånd. Sænk den, hvis der ses korn. 0 = fra.',
       help_background_source: 'Temaets baggrund bruger det billede/den farve, temaet har sat (lovelace-background).',
       help_background_image: 'Fx /local/backgrounds/mit-billede.jpg (filen ligger i /config/www/backgrounds/).',
@@ -4285,23 +4781,106 @@
     }
   }
 
+  // Ikoner på sektionerne. Samme ikoner bruges i panelet "Ændret fra standard".
+  const SEC_ICONS = {
+    general: 'mdi:tune',
+    style: 'mdi:palette',
+    bg: 'mdi:image',
+    colors: 'mdi:invert-colors',
+    weather: 'mdi:weather-partly-rainy',
+    adv: 'mdi:cog',
+    changed: 'mdi:restore',
+  };
+  const SEC_ORDER = ['general', 'style', 'bg', 'colors', 'weather', 'adv'];
+
+  // Indstillinger, der aldrig nulstilles eller vises i panelet: kortets type, valgt stil og entiteterne
+  const PANEL_SKIP = ['type', 'name', 'style', 'weather_entity', 'sun_entity'];
+  const GENERAL_KEYS = ['display_mode', 'card_height', 'card_border', 'card_border_width', 'card_border_color', 'card_shadow', 'card_shadow_strength', 'card_radius', 'card_radius_px', 'card_transparent', 'card_bg_opacity', 'cards', 'animation_enabled', 'opacity', 'speed', 'density', 'interaction'];
+  const WEATHER_KEYS = ['weather_overlay', 'rain', 'snow', 'fog', 'stars', 'weather_override'];
+
+  // Hvilken sektion en indstilling hører til (også når den ikke er synlig lige nu)
+  function sectionOf(k) {
+    if (GENERAL_KEYS.includes(k)) return 'general';
+    if (k.startsWith('background_')) return 'bg';
+    if (k.startsWith('color_')) return 'colors';
+    if (WEATHER_KEYS.includes(k)) return 'weather';
+    if (STYLE_IDS.some((id) => k.startsWith(`${id}_`))) return 'style';
+    return 'adv';
+  }
+
+  // Indstillinger, der afviger fra standard, i samme rækkefølge som DEFAULTS
+  function changedList(cfg) {
+    const out = [];
+    for (const k of Object.keys(DEFAULTS)) {
+      if (PANEL_SKIP.includes(k) || !cfg || !Object.prototype.hasOwnProperty.call(cfg, k)) continue;
+      if (JSON.stringify(cfg[k]) !== JSON.stringify(DEFAULTS[k])) out.push({ k, sec: sectionOf(k) });
+    }
+    return out;
+  }
+
+  // Værdi som læsbar tekst. Farver giver også en farve til en lille prik.
+  function fmtValue(hass, k, v) {
+    if (k === 'cards' && Array.isArray(v)) return { text: `${v.length} ${t(hass, 'cards_unit')}` };
+    if (Array.isArray(v) && v.length === 3 && v.every((n) => typeof n === 'number')) {
+      return { text: v.join(', '), color: `rgb(${v.join(',')})` };
+    }
+    if (typeof v === 'boolean') return { text: t(hass, v ? 'val_on' : 'val_off') };
+    if (typeof v === 'string') {
+      if (v === '') return { text: '–' };
+      const o = tryT(hass, `opt_${k}_${v}`);
+      if (o !== undefined) return { text: o };
+      return { text: v.length > 28 ? `${v.slice(0, 27)}…` : v };
+    }
+    return { text: String(v) };
+  }
+
   function buildSchema(cfg, tr) {
     const style = cfg.style || DEFAULTS.style;
     const styleName = tr(`style_${style}`);
     const manual = cfg.color_mode === 'manual';
     const src = cfg.background_source || DEFAULTS.background_source;
     return [
-      { name: 'style', selector: { select: { mode: 'dropdown', options: STYLE_IDS.map((v) => ({ value: v, label: tr(`style_${v}`) })) } } },
-      { name: 'animation_enabled', selector: { boolean: {} } },
-      { name: 'weather_entity', selector: { entity: { domain: 'weather' } } },
-      { name: 'opacity', selector: slider(0.1, 1, 0.05) },
-      { name: 'speed', selector: slider(0.2, 3, 0.1) },
-      { name: 'density', selector: slider(0.2, 2, 0.1) },
-      { name: 'interaction', selector: { boolean: {} } },
+      {
+        type: 'expandable',
+        name: 'sec_general',
+        title: tr('sec_general'),
+        icon: SEC_ICONS.general,
+        flatten: true,
+        expanded: true,
+        schema: [
+          { name: 'style', selector: { select: { mode: 'dropdown', options: STYLE_IDS.map((v) => ({ value: v, label: tr(`style_${v}`) })) } } },
+          { name: 'display_mode', selector: opts('display_mode', ['background', 'card'], tr) },
+          ...(cfg.display_mode === 'card'
+            ? [
+                { name: 'card_height', selector: { number: { min: 10, max: 600, step: 5, mode: 'slider', unit_of_measurement: 'px' } } },
+                { name: 'card_border', selector: opts('card_border', ['theme', 'none', 'custom'], tr) },
+                ...(cfg.card_border === 'custom'
+                  ? [
+                      { name: 'card_border_width', selector: slider(1, 8, 0.5) },
+                      { name: 'card_border_color', selector: { color_rgb: {} } },
+                    ]
+                  : []),
+                { name: 'card_shadow', selector: opts('card_shadow', ['theme', 'none', 'custom'], tr) },
+                ...(cfg.card_shadow === 'custom' ? [{ name: 'card_shadow_strength', selector: slider(0.2, 3, 0.1) }] : []),
+                { name: 'card_radius', selector: opts('card_radius', ['theme', 'square', 'custom'], tr) },
+                ...(cfg.card_radius === 'custom' ? [{ name: 'card_radius_px', selector: slider(0, 60, 1) }] : []),
+                { name: 'card_transparent', selector: { boolean: {} } },
+                ...(cfg.card_transparent ? [{ name: 'card_bg_opacity', selector: slider(0, 1, 0.05) }] : []),
+              ]
+            : []),
+          { name: 'animation_enabled', selector: { boolean: {} } },
+          { name: 'weather_entity', selector: { entity: { domain: 'weather' } } },
+          { name: 'opacity', selector: slider(0.1, 1, 0.05) },
+          { name: 'speed', selector: slider(0.2, 3, 0.1) },
+          { name: 'density', selector: slider(0.2, 2, 0.1) },
+          { name: 'interaction', selector: { boolean: {} } },
+        ],
+      },
       {
         type: 'expandable',
         name: 'sec_style',
         title: `${tr('sec_style')}: ${styleName}`,
+        icon: SEC_ICONS.style,
         flatten: true,
         expanded: true,
         schema: styleSchema(style, cfg, tr),
@@ -4310,6 +4889,7 @@
         type: 'expandable',
         name: 'sec_bg',
         title: tr('sec_bg'),
+        icon: SEC_ICONS.bg,
         flatten: true,
         schema: [
           { name: 'background_source', selector: opts('background_source', ['none', 'theme', 'image', 'video'], tr) },
@@ -4332,6 +4912,7 @@
         type: 'expandable',
         name: 'sec_colors',
         title: tr('sec_colors'),
+        icon: SEC_ICONS.colors,
         flatten: true,
         schema: [
           { name: 'color_mode', selector: opts('color_mode', ['auto', 'manual'], tr) },
@@ -4347,6 +4928,7 @@
         type: 'expandable',
         name: 'sec_weather',
         title: tr('sec_weather'),
+        icon: SEC_ICONS.weather,
         flatten: true,
         schema: [
           { name: 'weather_overlay', selector: { boolean: {} } },
@@ -4361,6 +4943,7 @@
         type: 'expandable',
         name: 'sec_adv',
         title: tr('sec_adv'),
+        icon: SEC_ICONS.adv,
         flatten: true,
         schema: [
           { name: 'max_fps', selector: slider(15, 60, 5) },
@@ -4369,7 +4952,7 @@
           { name: 'dither_strength', selector: slider(0, 2, 0.1) },
           { name: 'sun_entity', selector: { entity: { domain: 'sun' } } },
           { name: 'respect_reduced_motion', selector: { boolean: {} } },
-          { name: 'always_show_preview', selector: { boolean: {} } },
+          ...(cfg.display_mode !== 'card' ? [{ name: 'always_show_preview', selector: { boolean: {} } }] : []),
         ],
       },
     ];
@@ -4385,11 +4968,28 @@
       const lang = langOf(hass);
       this._hass = hass;
       if (this._form) this._form.hass = hass;
+      if (this._stack) this._stack.hass = hass;
+      if (this._fb) this._fb.hass = hass;
       // Tekster i valglister ligger i skemaet, så formularen bygges igen ved sprogskift
       if (this._lang !== lang) {
         this._lang = lang;
         if (this._config) this._render();
       }
+    }
+
+    set lovelace(v) {
+      this._lovelace = v;
+      if (this._stack) this._stack.lovelace = v;
+    }
+
+    get lovelace() {
+      return this._lovelace;
+    }
+
+    // HA's kortredigering sætter også context på editoren; kortvælgeren bruger den
+    set context(c) {
+      this._context = c;
+      if (this._stack) this._stack.context = c;
     }
 
     _render() {
@@ -4407,9 +5007,7 @@
             const def = DEFAULTS[k];
             if (k === 'style' || JSON.stringify(merged[k]) !== JSON.stringify(def)) config[k] = merged[k];
           }
-          this._config = config;
-          this.dispatchEvent(new CustomEvent('config-changed', { detail: { config }, bubbles: true, composed: true }));
-          this._render();
+          this._commit(config);
         });
         this.appendChild(this._form);
       }
@@ -4417,6 +5015,266 @@
       this._form.hass = this._hass;
       this._form.data = data;
       this._form.schema = buildSchema(data, (k) => t(this._hass, k));
+      this._renderCards(data);
+      this._renderChanged();
+    }
+
+    // Gemmer en ny liste af kort på animationen (tom liste fjerner nøglen, så standarden gælder)
+    _setCards(cards) {
+      const config = { ...this._config };
+      if (Array.isArray(cards) && cards.length) config.cards = cards;
+      else delete config.cards;
+      this._commit(config);
+    }
+
+    // Sektionen "Kort på animationen": HA's egen stack-editor med kortvælger (eller YAML som nødløsning)
+    _renderCards(data) {
+      const hass = this._hass;
+      if (!this._cbox) {
+        const box = document.createElement('ha-expansion-panel');
+        box.className = 'abc-panel';
+        box.outlined = true;
+        box.addEventListener('expanded-changed', (ev) => {
+          if (ev.target === box) this._cOpen = !!(ev.detail && ev.detail.expanded);
+        });
+        const hd = document.createElement('div');
+        hd.slot = 'header';
+        hd.className = 'abc-hd';
+        const ic = document.createElement('ha-icon');
+        ic.setAttribute('icon', 'mdi:card-multiple-outline');
+        this._chTxt = document.createElement('span');
+        hd.append(ic, this._chTxt);
+        this._cbody = document.createElement('div');
+        this._cbody.className = 'abc-body';
+        this._chelp = document.createElement('div');
+        this._chelp.className = 'abc-none';
+        this._cbody.appendChild(this._chelp);
+        box.append(hd, this._cbody);
+        this._cbox = box;
+        this.appendChild(box);
+        this._mountStack();
+      }
+      const cards = Array.isArray(data.cards) ? data.cards : [];
+      this._cbox.hidden = data.display_mode !== 'card';
+      this._chTxt.textContent = t(hass, 'cards');
+      this._chelp.textContent = t(hass, 'help_cards');
+      this._cbox.expanded = this._cOpen !== undefined ? this._cOpen : cards.length > 0;
+      this._syncStack(cards);
+    }
+
+    _syncStack(cards) {
+      const sig = JSON.stringify(cards);
+      if (sig === this._stackSig) return;
+      if (this._stack) {
+        this._stackSig = sig;
+        this._stack.setConfig({ type: 'vertical-stack', cards });
+      } else if (this._fb) {
+        this._stackSig = sig;
+        this._fb.data = { cards };
+      }
+    }
+
+    async _mountStack() {
+      let el = null;
+      try {
+        const helpers = await window.loadCardHelpers();
+        helpers.createCardElement({ type: 'vertical-stack', cards: [] }); // sørger for, at stack-kortets klasse indlæses
+        await Promise.race([
+          customElements.whenDefined('hui-vertical-stack-card'),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000)),
+        ]);
+        el = await customElements.get('hui-vertical-stack-card').getConfigElement();
+      } catch (e) {
+        el = null;
+      }
+      if (el && typeof el.setConfig === 'function') {
+        el.hass = this._hass;
+        if (this._lovelace) el.lovelace = this._lovelace;
+        if (this._context) el.context = this._context;
+        el.addEventListener('config-changed', (ev) => {
+          ev.stopPropagation();
+          const cards = (ev.detail && ev.detail.config && ev.detail.config.cards) || [];
+          this._stackSig = JSON.stringify(cards);
+          this._setCards(cards);
+        });
+        this._stack = el;
+        this._cbody.appendChild(el);
+      } else {
+        // Nødløsning: kortene som YAML
+        const note = document.createElement('div');
+        note.className = 'abc-none';
+        note.textContent = t(this._hass, 'cards_fallback');
+        const fb = document.createElement('ha-form');
+        fb.hass = this._hass;
+        fb.schema = [{ name: 'cards', selector: { object: {} } }];
+        fb.computeLabel = () => t(this._hass, 'cards');
+        fb.addEventListener('value-changed', (ev) => {
+          ev.stopPropagation();
+          const cards = (ev.detail && ev.detail.value && ev.detail.value.cards) || [];
+          this._stackSig = JSON.stringify(cards);
+          this._setCards(cards);
+        });
+        this._fb = fb;
+        this._cbody.append(note, fb);
+      }
+      this._stackSig = null;
+      this._syncStack(Array.isArray(this._config && this._config.cards) ? this._config.cards : []);
+    }
+
+    // Gemmer en ny konfiguration, giver HA besked og tegner editoren igen
+    _commit(config) {
+      this._config = config;
+      this._confirmAll = false;
+      this.dispatchEvent(new CustomEvent('config-changed', { detail: { config }, bubbles: true, composed: true }));
+      this._render();
+    }
+
+    // Nulstiller de angivne indstillinger (fjerner dem fra YAML'en, så standarden gælder)
+    _resetKeys(keys) {
+      const config = { ...this._config };
+      keys.forEach((k) => delete config[k]);
+      this._commit(config);
+    }
+
+    // Panelet "Ændret fra standard (N)" nederst i editoren
+    _renderChanged() {
+      const hass = this._hass;
+      const tr = (k) => t(hass, k);
+      const list = changedList(this._config);
+      const n = list.length;
+
+      if (!this._panel) {
+        const st = document.createElement('style');
+        st.textContent = `
+          .abc-panel{display:block;margin-top:24px}
+          .abc-hd{display:flex;align-items:center;gap:8px;font-weight:500}
+          .abc-hd ha-icon{color:var(--secondary-text-color)}
+          .abc-body{padding:4px 8px 8px}
+          .abc-none{color:var(--secondary-text-color);padding:8px 0}
+          .abc-gt{display:flex;align-items:center;gap:8px;margin:12px 0 4px;color:var(--secondary-text-color);font-size:12px;font-weight:500;text-transform:uppercase;letter-spacing:.04em}
+          .abc-gt ha-icon{--mdc-icon-size:18px}
+          .abc-row{display:flex;align-items:center;gap:8px;padding:4px 0;min-height:36px}
+          .abc-n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+          .abc-v{display:flex;align-items:center;gap:6px;color:var(--secondary-text-color);max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+          .abc-dot{width:12px;height:12px;border-radius:50%;border:1px solid var(--divider-color);flex:none}
+          .abc-btn{flex:none;display:inline-flex;align-items:center;justify-content:center;gap:4px;border:0;background:transparent;color:var(--primary-color);cursor:pointer;border-radius:50%;width:32px;height:32px;padding:0;font:inherit}
+          .abc-btn:hover{background:var(--secondary-background-color)}
+          .abc-btn ha-icon{--mdc-icon-size:20px}
+          .abc-all{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:12px;padding-top:8px;border-top:1px solid var(--divider-color)}
+          .abc-txt{width:auto;border-radius:16px;padding:0 12px;font-weight:500}
+          .abc-ask{color:var(--secondary-text-color)}
+        `;
+        this.appendChild(st);
+        this._panel = document.createElement('ha-expansion-panel');
+        this._panel.className = 'abc-panel';
+        this._panel.outlined = true;
+        this._panel.addEventListener('expanded-changed', (ev) => {
+          if (ev.target === this._panel) this._panelOpen = !!(ev.detail && ev.detail.expanded);
+        });
+        this._head = document.createElement('div');
+        this._head.slot = 'header';
+        this._head.className = 'abc-hd';
+        const ic = document.createElement('ha-icon');
+        ic.setAttribute('icon', SEC_ICONS.changed);
+        this._headTxt = document.createElement('span');
+        this._head.append(ic, this._headTxt);
+        this._body = document.createElement('div');
+        this._body.className = 'abc-body';
+        this._panel.append(this._head, this._body);
+        this.appendChild(this._panel);
+      }
+
+      this._headTxt.textContent = `${tr('sec_changed')} (${n})`;
+      // Folder sig selv ud, når noget er ændret, medmindre brugeren selv har valgt åben/lukket
+      this._panel.expanded = this._panelOpen !== undefined ? this._panelOpen : n > 0;
+
+      const body = this._body;
+      body.textContent = '';
+      if (!n) {
+        const d = document.createElement('div');
+        d.className = 'abc-none';
+        d.textContent = tr('changed_none');
+        body.appendChild(d);
+        return;
+      }
+
+      const mkBtn = (cls, icon, title, text, onClick) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = cls;
+        if (title) b.title = title;
+        if (icon) {
+          const i = document.createElement('ha-icon');
+          i.setAttribute('icon', icon);
+          b.appendChild(i);
+        }
+        if (text) b.appendChild(document.createTextNode(text));
+        b.addEventListener('click', onClick);
+        return b;
+      };
+
+      // Grupper: de almindelige sektioner, og stilens indstillinger delt op efter den stil, de hører til
+      const groups = [];
+      for (const sec of SEC_ORDER) {
+        if (sec !== 'style') {
+          groups.push({ sec, title: tr(`sec_${sec}`), rows: list.filter((x) => x.sec === sec) });
+          continue;
+        }
+        for (const id of STYLE_IDS) {
+          groups.push({ sec, title: `${tr('sec_style')}: ${tr(`style_${id}`).split(' (')[0]}`, rows: list.filter((x) => x.sec === 'style' && x.k.startsWith(`${id}_`)) });
+        }
+      }
+
+      for (const { sec, title, rows } of groups) {
+        if (!rows.length) continue;
+        const gt = document.createElement('div');
+        gt.className = 'abc-gt';
+        const gi = document.createElement('ha-icon');
+        gi.setAttribute('icon', SEC_ICONS[sec]);
+        gt.append(gi, document.createTextNode(title));
+        body.appendChild(gt);
+        for (const { k } of rows) {
+          const row = document.createElement('div');
+          row.className = 'abc-row';
+          const name = document.createElement('span');
+          name.className = 'abc-n';
+          name.textContent = tryT(hass, k) || k;
+          const val = document.createElement('span');
+          val.className = 'abc-v';
+          const f = fmtValue(hass, k, this._config[k]);
+          if (f.color) {
+            const dot = document.createElement('span');
+            dot.className = 'abc-dot';
+            dot.style.background = f.color;
+            val.appendChild(dot);
+          }
+          val.appendChild(document.createTextNode(f.text));
+          row.append(name, val, mkBtn('abc-btn', 'mdi:restore', tr('changed_reset'), '', () => this._resetKeys([k])));
+          body.appendChild(row);
+        }
+      }
+
+      const all = document.createElement('div');
+      all.className = 'abc-all';
+      if (!this._confirmAll) {
+        all.appendChild(mkBtn('abc-btn abc-txt', 'mdi:restore', '', tr('changed_reset_all'), () => {
+          this._confirmAll = true;
+          this._renderChanged();
+        }));
+      } else {
+        const q = document.createElement('span');
+        q.className = 'abc-ask';
+        q.textContent = tr('changed_confirm');
+        all.append(
+          q,
+          mkBtn('abc-btn abc-txt', '', '', tr('changed_yes'), () => this._resetKeys(list.map((x) => x.k))),
+          mkBtn('abc-btn abc-txt', '', '', tr('changed_no'), () => {
+            this._confirmAll = false;
+            this._renderChanged();
+          })
+        );
+      }
+      body.appendChild(all);
     }
   }
 

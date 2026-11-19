@@ -1,6 +1,6 @@
 # Ambient Backdrop
 
-Animated, weather-aware backgrounds for Home Assistant dashboards. One invisible card puts a live canvas animation behind your whole dashboard.
+Animated, weather-aware backgrounds for Home Assistant dashboards. One invisible card puts a live canvas animation behind your whole dashboard, or shows it as a regular card.
 
 ![Overview of all styles](https://raw.githubusercontent.com/oreskov/ambient-backdrop-card/main/images/overview.png)
 
@@ -8,7 +8,9 @@ Animated, weather-aware backgrounds for Home Assistant dashboards. One invisible
 - **Weather overlay:** rain with depth, downpour, thunderstorm (branching lightning and afterglow), snow (soft flakes and crystals, drifting in gusts), fog and stars on a clear night sky
 - **Reacts to weather and day/night** through a `weather.*` entity and `sun.sun`, with smooth color transitions
 - **Your own background underneath:** the theme background, an image or an mp4 video in a loop, with dimming and blur. The animation lies transparently on top
-- **Visual editor** with separate settings for every style. The editor is available in English and Danish and follows the Home Assistant language
+- **Two ways to show it:** as an invisible background behind the whole dashboard, or as a regular card you can place anywhere
+- **Cards on top of the animation:** in card mode you can put other cards, such as buttons, on top of the animation with the card picker
+- **Visual editor** with sections, an icon for each section, a help text under every setting and a panel that shows what you have changed from the defaults. The editor is available in English and Danish and follows the Home Assistant language
 - **Gentle on hardware:** FPS cap, fewer objects on mobile, automatic scaling down on slow devices, pause in hidden tabs, and respect for "reduce motion"
 
 No external files or CDN links. Everything is drawn with canvas.
@@ -83,6 +85,8 @@ Replace `weather.YOUR_WEATHER_ENTITY` with a weather entity from your own setup.
 
 The card is invisible when you are not editing. The background runs only on the dashboards and views where the card exists. If you have several views, add the card to each view. Switching between views that have the card does not make the background blink.
 
+Only one background card is active per view: the first one that loads. Any further background cards are hidden, and while you edit they show a message. Regular cards (see below) do not count, so you can use one background card and as many regular cards as you like on the same view.
+
 ---
 
 ## Settings
@@ -95,6 +99,7 @@ Everything can be set in the visual editor. These are the YAML names:
 | `style` | `particles` | `particles`, `network`, `flow`, `matrix`, `retro`, `hex`, `aurora`, `curtains`, `starfield`, `fireflies`, `dust`, `bokeh`, `lava`, `gradient`, `waves`, `rainwindow` |
 | `weather_entity` | empty | A `weather.*` entity. Empty = no weather reaction (clear weather) |
 | `sun_entity` | `sun.sun` | Used for day/night. If it is missing, the clock is used (night 20-07) |
+| `display_mode` | `background` | `background` (invisible, behind the whole dashboard) or `card` (shown as a regular card) |
 | `animation_enabled` | `true` | Turn off to show only the background/video. The weather overlay has its own switch (`weather_overlay`). If both are off and a background is selected, drawing stops completely |
 | `opacity` | `0.85` | Opacity of the animation itself |
 | `speed` | `1` | Speed (0.2-3) |
@@ -104,6 +109,40 @@ Everything can be set in the visual editor. These are the YAML names:
 | `fill_background` | `true` | Draws a colored background behind the animation |
 | `dither` | `true` | Almost invisible noise that removes banding/squares in gradients on large screens. Turn off if an old device stutters |
 | `dither_strength` | `1` | Noise strength (0-2). Raise it if you still see bands. Lower it if you see grain |
+
+### Regular card (`display_mode: card`)
+These settings only apply when `display_mode` is `card`. In this mode the card does not touch the dashboard background and has its own animation and background inside the card. The animation and video pause when the card is off screen.
+
+| Setting | Default | Description |
+|---|---|---|
+| `card_height` | `200` | Minimum height in pixels (10-600). Use a low value for a thin separator |
+| `card_border` | `theme` | `theme` (as your theme), `none` or `custom` |
+| `card_border_width` | `1` | Border width in pixels, when `card_border` is `custom` |
+| `card_border_color` | `[255,255,255]` | Border color, when `card_border` is `custom` |
+| `card_shadow` | `theme` | `theme`, `none` or `custom` |
+| `card_shadow_strength` | `1` | Shadow strength, when `card_shadow` is `custom` |
+| `card_radius` | `theme` | `theme`, `square` or `custom` |
+| `card_radius_px` | `12` | Corner radius in pixels, when `card_radius` is `custom` |
+| `card_transparent` | `false` | Makes the background behind the animation see-through so the dashboard shows through |
+| `card_bg_opacity` | `0.5` | How much of the background is visible when `card_transparent` is on (0-1) |
+| `cards` | empty | Cards shown on top of the animation (see below) |
+
+#### Cards on top of the animation
+Add other cards, for example buttons or tiles, on top of the animation. In the editor, open **Cards on the animation** and use the card picker like in a stack card. In YAML it is a list:
+
+```yaml
+type: custom:ambient-backdrop-card
+display_mode: card
+style: particles
+card_transparent: true
+cards:
+  - type: tile
+    entity: light.YOUR_LIGHT
+  - type: button
+    entity: switch.YOUR_SWITCH
+```
+
+The cards are shown in a vertical stack and the height follows their content (`card_height` is the minimum). For side by side layouts, add a `horizontal-stack` or `grid` card to the list. The cards are edited through this card and cannot be selected one by one on the dashboard. Showing the card inside other cards, such as a pop-up, has not been tested.
 
 ### Background (behind the animation)
 | Setting | Default | Description |
@@ -184,21 +223,26 @@ Styles are listed in the same order as in the editor's dropdown.
 
 All styles are drawn on one canvas and scale themselves down on slow devices. As a rule of thumb:
 
-- **Light:** gradient, particles, bokeh, starfield.
-- **Medium:** waves, hex grid, fireflies, rain on window, dust, flow, network.
-- **Heavier:** lava lamp, aurora, aurora curtains and matrix. Retro grid is heavier with the city skyline or the colored sky.
+- **Light:** gradient, waves, bokeh, retro grid, network, starfield, fireflies, particles and matrix (with the default settings). Retro grid is heavier with the city skyline or the colored sky.
+- **Medium:** hex grid, rain on window, dust, flow.
+- **Heavier:** lava lamp, aurora and aurora curtains. Aurora curtains is the heaviest, then aurora.
 
 If a device stutters, lower `max_fps` (15-60, default `40`), lower `density`, turn off `interaction`, or choose a lighter style. In Matrix, `matrix_glow_style: round` and `matrix_smooth: false` are the cheapest settings. The weather overlay has its own cost and can be turned off with `weather_overlay: false`.
+
+Animation and video stop when the card is off screen or the tab is hidden. In card mode a smaller card is cheaper than a background that covers the whole screen.
 
 ---
 
 ## Troubleshooting
 
 **The background does not show**
-1. Check that the resource is loaded: open F12 → Console. It should say `AMBIENT-BACKDROP-CARD v1.2.0`. If it does not, the resource is not registered or the cache must be cleared.
+1. Check that the resource is loaded: open F12 → Console. It should say `AMBIENT-BACKDROP-CARD v1.3.0`. If it does not, the resource is not registered or the cache must be cleared.
 2. Is the card in the current view? Edit the dashboard and look for the card with the text "Ambient Backdrop".
 3. Set `weather_override: rain` to see whether the effects work.
 4. If the cards have a solid background, you cannot see the animation behind them. Make the cards slightly transparent with a theme or card-mod.
+
+**A second background card shows a message**
+Only one background card is active per view. The first one that loads is used, and the others are hidden (while you edit they show a message). Remove the extra one, or set it to `display_mode: card` if you want it as a regular card.
 
 **The dashboard's own background covers the animation**
 The card makes the background of `hui-root` transparent. If your theme uses another background variable, try setting `lovelace-background: transparent` in the theme.
@@ -240,6 +284,12 @@ All texts are in the `STRINGS` object (section 8). To add a language, copy the w
 ---
 
 ## Release notes
+
+**1.3.0**
+- New display mode: show the animation as a regular card, with options for border, shadow, corners, transparent background and height (down to 10 px)
+- Cards on top of the animation, chosen with the card picker in the editor
+- Redesigned editor: sections with icons, a help text under every setting, and a panel showing what you changed from the defaults
+- Fix: two background cards on the same view no longer take the background from each other. The first one wins
 
 **1.2.0** First public release.
 
